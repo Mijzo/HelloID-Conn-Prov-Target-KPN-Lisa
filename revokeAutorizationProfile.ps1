@@ -48,36 +48,9 @@ function Get-LisaAccessToken {
         $PSCmdlet.ThrowTerminatingError($_)
     }
 }
-
-function Resolve-HTTPError {
-    [CmdletBinding()]
-    param (
-        [Parameter(Mandatory,
-            ValueFromPipeline
-        )]
-        [object]$ErrorObject
-    )
-    process {
-        $HttpErrorObj = @{
-            FullyQualifiedErrorId = $ErrorObject.FullyQualifiedErrorId
-            InvocationInfo        = $ErrorObject.InvocationInfo.MyCommand
-            TargetObject          = $ErrorObject.TargetObject.RequestUri
-        }
-        if ($ErrorObject.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') {
-            $HttpErrorObj['ErrorMessage'] = $ErrorObject.ErrorDetails.Message
-        } elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
-            $stream = $ErrorObject.Exception.Response.GetResponseStream()
-            $stream.Position = 0
-            $streamReader = New-Object System.IO.StreamReader $Stream
-            $errorResponse = $StreamReader.ReadToEnd()
-            $HttpErrorObj['ErrorMessage'] = $errorResponse
-        }
-        Write-Output "'$($HttpErrorObj.ErrorMessage)', TargetObject: '$($HttpErrorObj.TargetObject), InvocationCommand: '$($HttpErrorObj.InvocationInfo)"
-    }
-}
 #endregion functions
 
-if (-not($dryRun -eq $true)) {
+if (-Not($dryRun -eq $true)) {
     try {
         $splatGetTokenParams = @{
             TenantId     = $c.AADtenantID
@@ -92,36 +65,43 @@ if (-not($dryRun -eq $true)) {
         $authorizationHeaders.Add("Content-Type", "application/json")
         $authorizationHeaders.Add("Mwp-Api-Version", "1.0")
 
+        $body = $aRef
+
         $splatParams = @{
-            Uri     = "$($c.BaseUrl)/users/$($aRef)/licenseprofiles/$($pRef.Reference)"
+            Uri     = "$($c.BaseUrl)//AuthorizationProfiles/$($pRef.Reference)/members"
             Headers = $authorizationHeaders
-            Method  = "DELETE"
+            Method  = 'DELETE'
+            body    = ($body | ConvertTo-Json)
         }
+
         $results = (Invoke-RestMethod @splatParams) #If 200 it returns a Empty String
+
         $success = $True;
         $auditLogs.Add([PSCustomObject]@{
                 Action  = "RevokePermission";
-                Message = "Permission $($pRef.Reference) removed from account $($aRef)";
+                Message = "Account $($aRef) removed from Permission $($pRef.Reference)";
                 IsError = $False;
             });
     } catch {
-        #write-verbose -verbose "($_)"
+        Write-Verbose $($_) -Verbose
+        $Err =  $([regex]::escape($Error[0].ErrorDetails)).replace("\","")
+
         $auditLogs.Add([PSCustomObject]@{
                 Action  = "RevokePermission";
-                Message = "Failed to remove permission $($pRef.Reference) from account $($aRef)";
-                IsError = $False;
+                Message = "Failed to remove account $($aRef) from permission $($pRef.Reference) Error: $($Err)";
+                IsError = $true;
             });
     }
 }
 else
 {
         $auditLogs.Add([PSCustomObject]@{
-                Action  = "GrantPermission";
-                Message = "Dry-Run";
+                Action  = "RevokePermission";
+                Message = "Params $($splatParams)";
                 IsError = $False;
             });    
+    
 }
-
 # Send results
 $result = [PSCustomObject]@{
     Success   = $success;

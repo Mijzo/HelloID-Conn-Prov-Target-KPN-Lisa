@@ -3,7 +3,7 @@ $aRef = $accountReference | ConvertFrom-Json;
 $pRef = $permissionReference | ConvertFrom-Json;
 $c = $configuration | ConvertFrom-Json;
 $success = $False;
-$auditLogs = [Collections.Generic.List[PSCustomObject]]::New()
+$auditLogs = [Collections.Generic.List[PSCustomObject]]::New();
 
 #region functions
 function Get-LisaAccessToken {
@@ -65,19 +65,20 @@ function Resolve-HTTPError {
         }
         if ($ErrorObject.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') {
             $HttpErrorObj['ErrorMessage'] = $ErrorObject.ErrorDetails.Message
-        } elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
+        }
+        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
             $stream = $ErrorObject.Exception.Response.GetResponseStream()
             $stream.Position = 0
             $streamReader = New-Object System.IO.StreamReader $Stream
             $errorResponse = $StreamReader.ReadToEnd()
             $HttpErrorObj['ErrorMessage'] = $errorResponse
         }
-        Write-Output "'$($HttpErrorObj.ErrorMessage)', TargetObject: '$($HttpErrorObj.TargetObject), InvocationCommand: '$($HttpErrorObj.InvocationInfo)"
+        Write-verbose -verbose "'$($HttpErrorObj.ErrorMessage)', TargetObject: '$($HttpErrorObj.TargetObject), InvocationCommand: '$($HttpErrorObj.InvocationInfo)"
     }
 }
 #endregion functions
 
-if (-not($dryRun -eq $true)) {
+if (-Not($dryRun -eq $true)) {
     try {
         $splatGetTokenParams = @{
             TenantId     = $c.AADtenantID
@@ -92,24 +93,54 @@ if (-not($dryRun -eq $true)) {
         $authorizationHeaders.Add("Content-Type", "application/json")
         $authorizationHeaders.Add("Mwp-Api-Version", "1.0")
 
-        $splatParams = @{
-            Uri     = "$($c.BaseUrl)/users/$($aRef)/licenseprofiles/$($pRef.Reference)"
-            Headers = $authorizationHeaders
-            Method  = "DELETE"
+        $body = @{
+            members = @($aRef)
         }
-        $results = (Invoke-RestMethod @splatParams) #If 200 it returns a Empty String
-        $success = $True;
-        $auditLogs.Add([PSCustomObject]@{
-                Action  = "RevokePermission";
-                Message = "Permission $($pRef.Reference) removed from account $($aRef)";
-                IsError = $False;
-            });
+
+        $splatParams = @{
+            Uri     = "$($c.BaseUrl)//AuthorizationProfiles/$($pRef.Reference)/members"
+            Headers = $authorizationHeaders
+            Method  = 'PATCH'
+            body    = ($body | ConvertTo-Json)
+        }
+
+        try {
+            $results = (Invoke-RestMethod @splatParams) #If 200 it returns a Empty String which represents 'success'
+
+            $success = $True;
+            $auditLogs.Add([PSCustomObject]@{
+                    Action  = "GrantPermission";
+                    Message = "Permission $($pRef.Reference) added to account $($aRef)";
+                    IsError = $False;
+            });            
+        } catch {
+            # Dig into the exception to get the Response details.
+            $status = ($_ | convertfrom-json).error
+            switch ($status.code)
+            {
+                "AlreadyMemberOfGroup"
+                {
+                    $success = $True;
+                    $auditLogs.Add([PSCustomObject]@{
+                        Action  = "GrantPermission";
+                        Message = "Permission $($pRef.Reference) already added to account $($aRef)";
+                        IsError = $False;
+                    });
+                    break
+                }
+                default 
+                {
+                    Write-Verbose -verbose "$results"
+                    break
+                }
+            }
+        }
     } catch {
-        #write-verbose -verbose "($_)"
+        Write-Verbose $($_) -Verbose
         $auditLogs.Add([PSCustomObject]@{
-                Action  = "RevokePermission";
-                Message = "Failed to remove permission $($pRef.Reference) from account $($aRef)";
-                IsError = $False;
+                Action  = "GrantPermission";
+                Message = "Failed to add account $($aRef) to permission $($pRef.Reference)";
+                IsError = $true;
             });
     }
 }
@@ -120,13 +151,14 @@ else
                 Message = "Dry-Run";
                 IsError = $False;
             });    
+    
 }
 
 # Send results
 $result = [PSCustomObject]@{
     Success   = $success;
     AuditLogs = $auditLogs;
-    Account   = [PSCustomObject]@{ };
+    Account   = $p;
 };
 
 Write-Output $result | ConvertTo-Json -Depth 10;

@@ -62,13 +62,13 @@ $authorizationHeaders.Add("Mwp-Api-Version", "1.0")
 
 
 $splatParams = @{
-    Uri     = "$($c.BaseUrl)/LicenseProfiles"
+    Uri     = "$($c.BaseUrl)/WorkspaceProfiles"
     Headers = $authorizationHeaders
     Method  = 'Get'
 }
-$resultPermissions = (Invoke-RestMethod @splatParams)
+$resultWorkspaceProfiles = (Invoke-RestMethod @splatParams)
 
-$permissions = $resultPermissions.value | Select-Object @{Name = 'DisplayName'; Expression = { "Licentieprofiel $($_.displayName)" } },
-@{Name = "Identification"; Expression = { @{Reference = $_.licenseProfileId } } }
+$permissions = $resultWorkspaceProfiles.value | Select-Object @{Name = 'DisplayName'; Expression = { "Werkplekprofiel $($_.friendlyDisplayName)" } },
+@{Name = "Identification"; Expression = { @{Reference = $_.workspaceProfileId } } }
 
 Write-Output ($permissions | ConvertTo-Json -Depth 10)
